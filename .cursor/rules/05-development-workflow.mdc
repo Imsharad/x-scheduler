@@ -1,0 +1,50 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Development Workflow
+
+## Setup
+1. Clone the repository
+2. Create a virtual environment: `python -m venv venv`
+3. Activate the virtual environment:
+   - Windows: `venv\Scripts\activate`
+   - macOS/Linux: `source venv/bin/activate`
+4. Install dependencies: `pip install -r requirements.txt`
+5. Copy `.env.example` to `.env` and fill in Twitter API credentials
+6. Configure settings in `config/config.yaml`
+
+## Running the Pipeline
+- For continuous operation: `python src/scheduler.py`
+- For a single test run: `python src/main.py`
+- For background operation:
+  - Linux/macOS: `nohup python src/scheduler.py > output.log 2>&1 &`
+  - Using screen: `screen -S twitter-bot python src/scheduler.py`
+  - Using cron: Schedule regular execution of `src/main.py`
+
+## Code Conventions
+- Follow PEP 8 style guidelines
+- Include docstrings for all modules, classes, and functions
+- Use type hints where appropriate
+- Log important events and errors with appropriate log levels
+- Handle errors gracefully, especially during API interactions
+- Add comments for complex logic
+
+## Testing
+Basic tests are provided in the `tests/` directory. Run with:
+```
+python -m unittest discover tests
+```
+
+## Expanding the Pipeline
+To add new content sources:
+1. Create a new class in `src/content_sources/` that implements the interface in `base_source.py`
+2. Update the main pipeline to use the new source
+
+To modify tweet processing:
+1. Edit the `content_processor.py` file to adjust templating, hashtags, etc.
+
+To change scheduling:
+1. Update the schedule settings in `config.yaml`
+2. Or modify the scheduling logic in `scheduler.py`

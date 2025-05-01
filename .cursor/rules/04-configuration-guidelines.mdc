@@ -1,0 +1,68 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Configuration Guidelines
+
+## Environment Variables
+Store sensitive data in a `.env` file (not committed to version control):
+- X_API_KEY - Twitter/X API Key
+- X_API_KEY_SECRET - Twitter/X API Key Secret
+- X_ACCESS_TOKEN - Twitter/X Access Token
+- X_ACCESS_TOKEN_SECRET - Twitter/X Access Token Secret
+- X_BEARER_TOKEN - Twitter/X Bearer Token (if needed)
+
+See [config/.env.example](mdc:config/.env.example) for the required format.
+
+## Configuration File
+Non-sensitive settings are stored in [config/config.yaml](mdc:config/config.yaml) with these sections:
+
+- `rss_feeds` - List of RSS feed URLs to fetch content from
+- `curated_content_file` - Path to CSV/JSON file with pre-written content
+- `schedule_settings` - Posting frequency and times
+- `tweet_templates` - Template strings for formatting tweets
+- `hashtags` - Default hashtags and keywords for hashtag selection
+- `cta_messages` - Call-to-action messages to append to tweets
+- `utm_parameters` - UTM tags for URL tracking
+- `character_limit` - Maximum characters for tweet text
+
+Example configuration:
+
+```yaml
+rss_feeds:
+  - https://example.com/feed.xml
+  - https://anotherblog.com/rss
+  
+curated_content_file: data/curated_content.csv
+
+schedule_settings:
+  post_interval_minutes: 240  # Post every 4 hours
+  post_times:  # Specific posting times (alternative to interval)
+    - "09:00"
+    - "17:00"
+
+tweet_templates:
+  - "{title} {url} #Tech #News {cta}"
+  - "Check out: {title} {url} {cta}"
+
+hashtags:
+  default:
+    - Tech
+    - News
+    - Programming
+  keywords_to_hashtags:
+    python: Python
+    javascript: JavaScript
+    ai: AI
+    
+cta_messages:
+  - "Read more on our blog:"
+  - "Check out our tool:"
+  
+utm_parameters:
+  utm_source: twitter_pipeline
+  utm_medium: social_organic
+  utm_campaign: content_sharing
+  
+character_limit: 280

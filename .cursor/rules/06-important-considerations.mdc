@@ -1,0 +1,35 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Important Considerations
+
+## API Rate Limits
+- **Critical**: Always respect Twitter/X API rate limits
+- The Twitter v2 API has different rate limits for different endpoints
+- The standard tweet posting limit is typically 300 requests per 3-hour window for standard API access
+- The `TwitterPoster` class in [src/twitter_poster.py](mdc:src/twitter_poster.py) implements rate limit handling
+- Always include delay between API calls and proper error handling for rate limit errors
+
+## Content Guidelines
+- Ensure all posted content complies with Twitter/X's terms of service
+- Avoid duplicate or repetitive content which could be flagged as spam
+- Maintain content variety and quality to maximize engagement
+- Review all automated tweet templates to ensure they create readable, valuable tweets
+
+## Security
+- Never commit sensitive API keys to version control
+- Always use the `.env` file for credentials and add it to `.gitignore`
+- Restrict file permissions on the `.env` file on production servers
+
+## Logging and Monitoring
+- The logging system in [src/utils.py](mdc:src/utils.py) captures key pipeline events
+- Monitor the logs regularly to catch any API errors or content issues
+- Consider setting up alerts for critical failures
+- Check the `processed_log.txt` file to track which content has been posted
+
+## Lead Generation and Tracking
+- All URLs should include UTM parameters for tracking in analytics
+- Review analytics regularly to assess which content types perform best
+- Adjust tweet templates, CTAs, and posting schedules based on performance data

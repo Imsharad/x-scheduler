@@ -1,0 +1,39 @@
+---
+description: 
+globs: *.py
+alwaysApply: false
+---
+# Core Modules
+
+## Content Sources
+The content sourcing system is modular to support different types of content:
+
+- [src/content_sources/base_source.py](mdc:src/content_sources/base_source.py) - Abstract base class defining the interface for all content sources
+- [src/content_sources/rss_source.py](mdc:src/content_sources/rss_source.py) - Fetches content from RSS feeds using feedparser
+- [src/content_sources/file_source.py](mdc:src/content_sources/file_source.py) - Reads content from curated CSV/JSON files
+
+## Content Processing
+[src/content_processor.py](mdc:src/content_processor.py) - Handles:
+- Templating tweets with content
+- Adding hashtags based on content or configuration
+- Adding UTM parameters to URLs for tracking
+- Adding calls-to-action (CTAs)
+- Ensuring tweets respect character limits
+
+## Twitter Integration
+[src/twitter_poster.py](mdc:src/twitter_poster.py) - Manages:
+- Authentication with Twitter/X API
+- Posting tweets with proper error handling
+- Rate limit management to ensure compliance with Twitter's policies
+
+## Scheduler
+[src/scheduler.py](mdc:src/scheduler.py) - Responsible for:
+- Setting up scheduled jobs based on configuration
+- Orchestrating the content pipeline (sourcing, processing, posting)
+- Managing a simple tweet queue to handle rate limits and avoid duplicates
+
+## Configuration
+[src/config_loader.py](mdc:src/config_loader.py) - Handles:
+- Loading API keys securely from environment variables
+- Loading application configuration from YAML/Python files
+- Providing a single interface for accessing all configuration

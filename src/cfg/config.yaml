@@ -1,0 +1,18 @@
+# Content source
+content_csv_path: "src/dat/curated_content.csv"
+content_format: "csv"
+
+# Scheduling
+schedule:
+  mode: "interval"  # interval or specific_times
+  interval_minutes: 60  # post every 1 hour
+  specific_times:  # alternative to interval, ignored if mode is "interval"
+    - "09:00"
+    - "17:00"
+    - "21:00"
+
+# Logging
+logging:
+  file_path: "src/log/pipeline.log"
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+
