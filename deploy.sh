@@ -1,10 +1,10 @@
- #!/bin/bash
+#!/bin/bash
 
 # --- CONFIGURATION ---
 AWS_REGION="us-east-1" # Change to your desired AWS region
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text) # Gets account ID automatically
 APP_NAME="x-scheduler"
-GIT_REPO_URL="https://github.com/YOUR_USERNAME/X-scheduler.git" # IMPORTANT: Set your repo URL 
+GIT_REPO_URL="https://github.com/Imsharad/x-scheduler.git" # Updated with correct GitHub repo URL
 EC2_INSTANCE_TYPE="t2.micro" # Free tier eligible instance type
 EC2_AMI_ID="" # Leave blank to fetch latest Amazon Linux 2 AMI automatically
 KEY_PAIR_NAME="${APP_NAME}-key-$(date +%s)" # Creates a unique key pair name
