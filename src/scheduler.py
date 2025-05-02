@@ -13,7 +13,6 @@ from pathlib import Path
 
 from .config import config
 from .utils import setup_logging, create_file_if_not_exists
-from .source import FileContentSource
 from .google_sheet_source import GoogleSheetSource
 from .processor import ContentProcessor
 from .poster import TwitterPoster
@@ -49,16 +48,10 @@ class TweetScheduler:
         
     def _create_content_source(self):
         """
-        Create and return the appropriate content source based on configuration.
+        Create and return the Google Sheets content source.
         """
-        source_type = self.content_source_config.get('source_type', 'file')
-        
-        if source_type == 'google_sheet':
-            self.logger.info("Using Google Sheets content source")
-            return GoogleSheetSource(self.content_source_config, self.logger)
-        else:
-            self.logger.info("Using file content source")
-            return FileContentSource(self.content_source_config, self.logger)
+        self.logger.info("Using Google Sheets content source")
+        return GoogleSheetSource(self.content_source_config, self.logger)
         
     def _init_components(self):
         """

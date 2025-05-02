@@ -53,7 +53,8 @@ class GoogleSheetSource:
         
         # Initialize Google Sheets API
         try:
-            scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+            # Update scopes to include write access
+            scopes = ['https://www.googleapis.com/auth/spreadsheets']
             credentials = service_account.Credentials.from_service_account_file(creds_path, scopes=scopes)
             self.client = gspread.authorize(credentials)
             
@@ -113,30 +114,55 @@ class GoogleSheetSource:
                     self.logger.warning("Cannot mark as posted: empty tweet text.")
                 return
                 
+            if self.logger:
+                self.logger.info(f"DEBUG: Marking tweet as posted: '{tweet_text}'")
+                
             # Get all records with their indexes
             all_values = self.worksheet.get_all_values()
             header = all_values[0]
             
+            if self.logger:
+                self.logger.info(f"DEBUG: Sheet header: {header}")
+            
             # Find tweet column and is_posted column
             try:
                 tweet_col_idx = header.index('tweet')
+                if self.logger:
+                    self.logger.info(f"DEBUG: Found tweet column at index {tweet_col_idx}")
                 
                 # Check if is_posted column exists
                 try:
                     is_posted_col_idx = header.index('is_posted')
+                    if self.logger:
+                        self.logger.info(f"DEBUG: Found is_posted column at index {is_posted_col_idx}")
                 except ValueError:
                     # Add is_posted column if it doesn't exist
                     is_posted_col_idx = len(header)
                     header.append('is_posted')
                     # Update header row
                     self.worksheet.update_cell(1, is_posted_col_idx + 1, 'is_posted')
+                    if self.logger:
+                        self.logger.info(f"DEBUG: Created new is_posted column at index {is_posted_col_idx}")
                 
                 # Find the row(s) with the matching tweet
                 for i, row in enumerate(all_values[1:], start=2):  # Start at 2 to account for 1-indexed cells and header row
                     if len(row) > tweet_col_idx and row[tweet_col_idx] == tweet_text:
+                        if self.logger:
+                            self.logger.info(f"DEBUG: Found matching tweet at row {i}")
+                            if len(row) > is_posted_col_idx:
+                                self.logger.info(f"DEBUG: Current is_posted value: '{row[is_posted_col_idx]}'")
+                                
                         # Update the is_posted cell to true
+                        self.logger.info(f"DEBUG: Setting cell ({i}, {is_posted_col_idx + 1}) to 'true'")
+                        
+                        # IMPORTANT: Use fixed string 'true' not the tweet text
                         self.worksheet.update_cell(i, is_posted_col_idx + 1, 'true')
                         
+                        # Double-check the updated value
+                        updated_value = self.worksheet.cell(i, is_posted_col_idx + 1).value
+                        if self.logger:
+                            self.logger.info(f"DEBUG: After update, is_posted value is: '{updated_value}'")
+                            
                         if self.logger:
                             self.logger.info(f"Marked as posted in Google Sheet: {tweet_text}")
                         return

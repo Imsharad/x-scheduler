@@ -110,34 +110,15 @@ class ConfigLoader:
     
     def get_content_source_config(self):
         """
-        Get content source configuration.
+        Get Google Sheets content source configuration.
         
         Returns:
-            dict: Content source configuration.
+            dict: Google Sheets content source configuration.
         """
-        # For backward compatibility
-        # If old format is present, use it; otherwise use new format
-        if 'content_sources' in self.config:
-            return self.config.get('content_sources', {})
-        
-        # Get content source type
-        source_type = self.config.get('content_source_type', 'file')
-        
-        if source_type == 'google_sheet':
-            # Return Google Sheets configuration
-            return {
-                'source_type': 'google_sheet',
-                'google_sheet': self.get_google_sheet_config()
-            }
-        else:
-            # Default to file source (original behavior)
-            return {
-                'source_type': 'file',
-                'curated_content': {
-                    'file_path': self.config.get('content_csv_path', 'src/dat/curated_content.csv'),
-                    'format': self.config.get('content_format', 'csv')
-                }
-            }
+        return {
+            'source_type': 'google_sheet',
+            'google_sheet': self.get_google_sheet_config()
+        }
     
     def get_google_sheet_config(self):
         """
