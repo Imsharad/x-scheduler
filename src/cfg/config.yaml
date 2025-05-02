@@ -1,6 +1,18 @@
-# Content source
-content_csv_path: "src/dat/curated_content.csv"
-content_format: "csv"
+# Content source configuration
+content_source_type: "google_sheet"
+
+# Google Sheets configuration
+google_sheet:
+  # The ID of the Google Sheet (found in the URL between /d/ and /edit)
+  # Example: https://docs.google.com/spreadsheets/d/THIS_IS_THE_ID/edit#gid=0
+  sheet_id: "1_aETvjDaI5uK8GYM-yBkwHGVO6ZIbEyTMhVj8MKM2aE"  # Updated with your actual Google Sheet ID
+  
+  # Optional: Name of the worksheet to use. If omitted, uses the first sheet
+  worksheet_name: "main"  # Optional: Change if your worksheet has a different name
+  
+  # Path to the Google service account credentials JSON file
+  # Can also be set via GOOGLE_CREDENTIALS_PATH environment variable
+  credentials_path: "config/google-credentials.json"
 
 # Scheduling
 schedule:

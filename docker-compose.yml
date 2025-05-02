@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  x-scheduler:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./src/log:/app/src/log
+      - ./src/dat:/app/src/dat
+    restart: always
