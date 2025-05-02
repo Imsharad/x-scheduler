@@ -53,4 +53,5 @@ Thumbs.db
 
 # AI/Meta/Tooling
 .cursor/
-memory-bank/ 
+memory-bank/
+deploy/
