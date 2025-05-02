@@ -43,3 +43,6 @@ twitter-automation-pipeline/
 - [src/scheduler.py](mdc:src/scheduler.py) - Main script for running the pipeline continuously
 - [config/config.yaml](mdc:config/config.yaml) - Configuration settings
 - [README.md](mdc:README.md) - Setup and usage instructions
+
+
+dont edit env files
