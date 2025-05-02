@@ -14,6 +14,7 @@ from pathlib import Path
 from .config import config
 from .utils import setup_logging, create_file_if_not_exists
 from .source import FileContentSource
+from .google_sheet_source import GoogleSheetSource
 from .processor import ContentProcessor
 from .poster import TwitterPoster
 
@@ -46,12 +47,25 @@ class TweetScheduler:
         
         self.logger.info("Tweet Scheduler initialized successfully.")
         
+    def _create_content_source(self):
+        """
+        Create and return the appropriate content source based on configuration.
+        """
+        source_type = self.content_source_config.get('source_type', 'file')
+        
+        if source_type == 'google_sheet':
+            self.logger.info("Using Google Sheets content source")
+            return GoogleSheetSource(self.content_source_config, self.logger)
+        else:
+            self.logger.info("Using file content source")
+            return FileContentSource(self.content_source_config, self.logger)
+        
     def _init_components(self):
         """
         Initialize content sources, processor, and poster.
         """
-        # Initialize file source
-        self.file_source = FileContentSource(self.content_source_config, self.logger)
+        # Initialize content source (file or Google Sheets)
+        self.content_source = self._create_content_source()
         
         # Initialize content processor
         self.processor = ContentProcessor(logger=self.logger)
@@ -99,25 +113,26 @@ class TweetScheduler:
         
     def get_content(self) -> Optional[Dict[str, Any]]:
         """
-        Get content from file source. Already filters based on 'is_posted' flag.
+        Get content from the configured source. Already filters based on 'is_posted' flag.
         
         Returns:
             dict: A content item to tweet, or None if no suitable content found.
         """
         self.logger.info("Fetching content for posting...")
         
-        # Get content from file source
+        # Get content from source
         all_content = []
         
         try:
-            # File content - fetch_content should only return unposted items
-            file_content = self.file_source.fetch_content()
-            all_content.extend(file_content)
+            # Get content from configured source
+            source_content = self.content_source.fetch_content()
+            all_content.extend(source_content)
             
-            self.logger.info(f"Fetched {len(all_content)} new items from curated file.")
+            source_name = self.content_source.get_name()
+            self.logger.info(f"Fetched {len(all_content)} new items from {source_name}.")
             
         except Exception as e:
-            self.logger.error(f"Error fetching file content: {str(e)}")
+            self.logger.error(f"Error fetching content: {str(e)}")
             
         # If no content available, return None
         if not all_content:
@@ -132,7 +147,7 @@ class TweetScheduler:
         
     def post_scheduled_tweet(self) -> bool:
         """
-        Post a scheduled tweet and mark it as posted in the source file.
+        Post a scheduled tweet and mark it as posted in the source.
         
         Returns:
             bool: True if tweet was posted successfully, False otherwise.
@@ -155,14 +170,14 @@ class TweetScheduler:
                 result = self.twitter_poster.post_tweet(tweet_text)
                 
                 if result:
-                    # Mark as posted in the file source upon successful posting
+                    # Mark as posted in the source upon successful posting
                     try:
-                        self.file_source.mark_as_posted(content_item)
+                        self.content_source.mark_as_posted(content_item)
                         self.logger.info("Tweet posted successfully and marked as posted in source.")
                         return True
                     except Exception as e:
                         # Log error but consider the tweet posted
-                        self.logger.error(f"Tweet posted successfully, but failed to mark as posted in source file: {str(e)}")
+                        self.logger.error(f"Tweet posted successfully, but failed to mark as posted in source: {str(e)}")
                         return True # Tweet was still posted
                 else:
                     self.logger.error("Failed to post tweet.")

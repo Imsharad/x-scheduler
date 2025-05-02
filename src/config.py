@@ -120,12 +120,43 @@ class ConfigLoader:
         if 'content_sources' in self.config:
             return self.config.get('content_sources', {})
         
-        # New simplified format
-        return {
-            'curated_content': {
-                'file_path': self.config.get('content_csv_path', 'src/dat/curated_content.csv'),
-                'format': self.config.get('content_format', 'csv')
+        # Get content source type
+        source_type = self.config.get('content_source_type', 'file')
+        
+        if source_type == 'google_sheet':
+            # Return Google Sheets configuration
+            return {
+                'source_type': 'google_sheet',
+                'google_sheet': self.get_google_sheet_config()
             }
+        else:
+            # Default to file source (original behavior)
+            return {
+                'source_type': 'file',
+                'curated_content': {
+                    'file_path': self.config.get('content_csv_path', 'src/dat/curated_content.csv'),
+                    'format': self.config.get('content_format', 'csv')
+                }
+            }
+    
+    def get_google_sheet_config(self):
+        """
+        Get Google Sheets configuration from config file and environment variables.
+        
+        Returns:
+            dict: Google Sheets configuration.
+        """
+        google_sheet_config = self.config.get('google_sheet', {})
+        
+        # Get credentials path from environment variable or config
+        creds_path = os.getenv('GOOGLE_CREDENTIALS_PATH')
+        if not creds_path:
+            creds_path = google_sheet_config.get('credentials_path')
+            
+        return {
+            'sheet_id': google_sheet_config.get('sheet_id'),
+            'worksheet_name': google_sheet_config.get('worksheet_name'),
+            'credentials_path': creds_path
         }
     
     def get_schedule_config(self):

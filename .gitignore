@@ -29,11 +29,17 @@ venv/
 ENV/
 
 # Logs
-logs/
+src/log/
 *.log
 
 # Data
-data/processed_log.txt
+src/dat/processed_log.txt
+
+# Credentials
+config/google-credentials.json
+*-credentials.json
+*.credentials.json
+service-account-*.json
 
 # IDE specific files
 .idea/
@@ -43,4 +49,8 @@ data/processed_log.txt
 
 # OS specific files
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# AI/Meta/Tooling
+.cursor/
+memory-bank/ 
