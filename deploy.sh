@@ -8,7 +8,57 @@ GIT_REPO_URL="https://github.com/Imsharad/x-scheduler.git" # Updated with correc
 EC2_INSTANCE_TYPE="t2.micro" # Free tier eligible instance type
 EC2_AMI_ID="" # Leave blank to fetch latest Amazon Linux 2 AMI automatically
 KEY_PAIR_NAME="${APP_NAME}-key-$(date +%s)" # Creates a unique key pair name
+KEYS_DIR="deploy/keys"
+mkdir -p "$KEYS_DIR"
+KEY_FILE="$KEYS_DIR/${KEY_PAIR_NAME}.pem"
 # --- END CONFIGURATION ---
+
+# --- Instance Check Logic ---
+# Check for existing running instance with Name=x-scheduler-instance
+EXISTING_INSTANCE_ID=$(aws ec2 describe-instances \
+    --filters "Name=tag:Name,Values=${APP_NAME}-instance" "Name=instance-state-name,Values=running" \
+    --region "$AWS_REGION" \
+    --query 'Reservations[0].Instances[0].InstanceId' \
+    --output text)
+
+if [ "$EXISTING_INSTANCE_ID" != "None" ] && [ -n "$EXISTING_INSTANCE_ID" ]; then
+    EXISTING_IP=$(aws ec2 describe-instances \
+        --instance-ids "$EXISTING_INSTANCE_ID" \
+        --region "$AWS_REGION" \
+        --query 'Reservations[0].Instances[0].PublicIpAddress' \
+        --output text)
+    echo "\nA running x-scheduler instance was found:"
+    echo "  Instance ID: $EXISTING_INSTANCE_ID"
+    echo "  Public IP: $EXISTING_IP"
+    echo "\nWhat would you like to do?"
+    echo "  [T]erminate and launch new instance"
+    echo "  [R]euse existing instance (show SSH info and exit)"
+    echo "  [A]bort deployment"
+    read -p "Enter your choice (T/R/A): " USER_CHOICE
+    case "$USER_CHOICE" in
+        [Tt]*)
+            echo "Terminating existing instance $EXISTING_INSTANCE_ID..."
+            aws ec2 terminate-instances --instance-ids "$EXISTING_INSTANCE_ID" --region "$AWS_REGION"
+            echo "Waiting for instance to terminate..."
+            aws ec2 wait instance-terminated --instance-ids "$EXISTING_INSTANCE_ID" --region "$AWS_REGION"
+            echo "Instance terminated. Proceeding with deployment."
+            ;;
+        [Rr]*)
+            echo "Reusing existing instance. SSH info:"
+            echo "ssh -i deploy/keys/<your-key>.pem ec2-user@$EXISTING_IP"
+            exit 0
+            ;;
+        [Aa]*)
+            echo "Aborting deployment."
+            exit 0
+            ;;
+        *)
+            echo "Invalid choice. Aborting."
+            exit 1
+            ;;
+    esac
+fi
+# --- End Instance Check Logic ---
 
 # --- Helper Functions ---
 check_command() {
@@ -160,12 +210,56 @@ aws ssm put-parameter --name "/$APP_NAME/access-token" --value "$X_ACCESS_TOKEN"
 aws ssm put-parameter --name "/$APP_NAME/access-token-secret" --value "$X_ACCESS_TOKEN_SECRET" --type SecureString --overwrite --region "$AWS_REGION" > /dev/null
 # Add put-parameter for Bearer Token if needed
 
+# Ask if user wants to configure Google Sheets integration
+echo "Do you want to configure Google Sheets integration? (y/n)"
+read USE_GOOGLE_SHEETS
+
+if [[ "$USE_GOOGLE_SHEETS" == "y" || "$USE_GOOGLE_SHEETS" == "Y" ]]; then
+    echo "Please enter Google Sheets configuration:"
+    read -p 'Google Sheet ID: ' GOOGLE_SHEET_ID
+    read -p 'Worksheet Name (leave empty for default): ' GOOGLE_WORKSHEET_NAME
+    
+    echo "You need to upload your Google service account credentials JSON file."
+    echo "Two options:"
+    echo "  1. Enter the contents of credentials file now (copy-paste)"
+    echo "  2. Upload the file to the EC2 instance manually later"
+    read -p 'Do you want to enter credentials now? (y/n): ' ENTER_CREDS_NOW
+    
+    if [[ "$ENTER_CREDS_NOW" == "y" || "$ENTER_CREDS_NOW" == "Y" ]]; then
+        echo "Paste the entire contents of your Google service account JSON file below."
+        echo "After pasting, press Ctrl+D to finish:"
+        GOOGLE_CREDENTIALS=$(cat)
+        
+        # Store Google credentials in SSM as secure string
+        aws ssm put-parameter --name "/$APP_NAME/google-credentials" --value "$GOOGLE_CREDENTIALS" --type SecureString --overwrite --region "$AWS_REGION" > /dev/null
+        check_command "Storing Google credentials in SSM"
+    fi
+    
+    # Store Google Sheet configuration
+    aws ssm put-parameter --name "/$APP_NAME/google-sheet-id" --value "$GOOGLE_SHEET_ID" --type String --overwrite --region "$AWS_REGION" > /dev/null
+    check_command "Storing Google Sheet ID in SSM"
+    
+    if [ -n "$GOOGLE_WORKSHEET_NAME" ]; then
+        aws ssm put-parameter --name "/$APP_NAME/google-worksheet-name" --value "$GOOGLE_WORKSHEET_NAME" --type String --overwrite --region "$AWS_REGION" > /dev/null
+        check_command "Storing Google Worksheet name in SSM"
+    fi
+    
+    # Set content source type to Google Sheets
+    aws ssm put-parameter --name "/$APP_NAME/content-source-type" --value "google_sheet" --type String --overwrite --region "$AWS_REGION" > /dev/null
+    check_command "Setting content source type to Google Sheets"
+    
+    echo "Google Sheets configuration stored in SSM Parameter Store."
+else
+    # Set content source type to file (default)
+    aws ssm put-parameter --name "/$APP_NAME/content-source-type" --value "file" --type String --overwrite --region "$AWS_REGION" > /dev/null
+    check_command "Setting content source type to file (default)"
+fi
+
 check_command "Storing secrets in SSM"
 echo "Secrets stored securely in SSM Parameter Store."
 
 # 5. Create EC2 Key Pair
 echo "Step 5: Creating EC2 Key Pair..."
-KEY_FILE="${KEY_PAIR_NAME}.pem"
 aws ec2 create-key-pair --key-name "$KEY_PAIR_NAME" --query 'KeyMaterial' --output text --region "$AWS_REGION" > "$KEY_FILE"
 check_command "Creating Key Pair"
 chmod 400 "$KEY_FILE"
@@ -191,6 +285,7 @@ USER_HOME="/home/ec2-user"
 APP_DIR="\$USER_HOME/$APP_NAME"
 VENV_DIR="\$APP_DIR/venv"
 LOG_FILE="\$APP_DIR/src/log/pipeline.log" # Ensure log dir exists if needed by logger
+CONFIG_DIR="\$APP_DIR/config"
 
 # Clone the repository as the ec2-user
 sudo -u ec2-user git clone $GIT_REPO_URL \$APP_DIR
@@ -202,6 +297,63 @@ sudo -u ec2-user \$VENV_DIR/bin/pip install -r \$APP_DIR/requirements.txt boto3
 # Ensure log directory exists and has correct permissions
 sudo -u ec2-user mkdir -p \$(dirname \$LOG_FILE)
 sudo -u ec2-user touch \$LOG_FILE
+
+# Create configuration directories
+sudo -u ec2-user mkdir -p \$CONFIG_DIR
+
+# Check if Google Sheets integration is enabled
+if aws ssm get-parameter --name "/$APP_NAME/content-source-type" --query 'Parameter.Value' --output text --region "$AWS_REGION" | grep -q "google_sheet"; then
+    echo "Configuring Google Sheets integration..."
+    
+    # Update config.yaml with Google Sheets settings
+    SHEET_ID=\$(aws ssm get-parameter --name "/$APP_NAME/google-sheet-id" --query 'Parameter.Value' --output text --region "$AWS_REGION")
+    
+    # Check if worksheet name is set
+    if aws ssm get-parameter --name "/$APP_NAME/google-worksheet-name" --region "$AWS_REGION" > /dev/null 2>&1; then
+        WORKSHEET_NAME=\$(aws ssm get-parameter --name "/$APP_NAME/google-worksheet-name" --query 'Parameter.Value' --output text --region "$AWS_REGION")
+        WORKSHEET_CONFIG="worksheet_name: \"\$WORKSHEET_NAME\""
+    else
+        WORKSHEET_CONFIG=""
+    fi
+    
+    # Create updated config.yaml
+    sudo -u ec2-user cat > "\$APP_DIR/src/cfg/config.yaml" << EOCFG
+# Content source configuration
+content_source_type: "google_sheet"
+
+# Google Sheets configuration
+google_sheet:
+  sheet_id: "\$SHEET_ID"
+  $([ -n "$WORKSHEET_CONFIG" ] && echo "$WORKSHEET_CONFIG")
+  credentials_path: "config/google-credentials.json"
+
+# Scheduling
+schedule:
+  mode: "interval"
+  interval_minutes: 60
+  specific_times:
+    - "09:00"
+    - "17:00"
+    - "21:00"
+
+# Logging
+logging:
+  file_path: "src/log/pipeline.log"
+  level: "INFO"
+EOCFG
+    
+    # Save Google credentials to file if available in SSM
+    if aws ssm get-parameter --name "/$APP_NAME/google-credentials" --with-decryption --region "$AWS_REGION" > /dev/null 2>&1; then
+        GOOGLE_CREDENTIALS=\$(aws ssm get-parameter --name "/$APP_NAME/google-credentials" --with-decryption --query 'Parameter.Value' --output text --region "$AWS_REGION")
+        sudo -u ec2-user echo "\$GOOGLE_CREDENTIALS" > "\$CONFIG_DIR/google-credentials.json"
+        sudo -u ec2-user chmod 600 "\$CONFIG_DIR/google-credentials.json"
+        echo "Google credentials saved to \$CONFIG_DIR/google-credentials.json"
+    else
+        echo "WARNING: Google credentials not found in SSM. You will need to add them manually."
+    fi
+else
+    echo "Using file-based content source (default)"
+fi
 
 # Create systemd service file
 cat << EOFF > /etc/systemd/system/$APP_NAME.service
