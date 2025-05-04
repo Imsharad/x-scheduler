@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for X-Scheduler Application Infrastructure
+
+Parameters:
+  KeyPairName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  InstanceTypeParameter:
+    Description: EC2 instance type for the X-Scheduler application
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      # Add other allowed types if needed
+    ConstraintDescription: must be a valid EC2 instance type.
+  S3BucketNameParameter:
+    Description: Name of the S3 bucket for video storage (must be globally unique)
+    Type: String
+  DynamoDBTableNameParameter:
+    Description: Name of the DynamoDB table for OAuth tokens
+    Type: String
+    Default: XSchedulerUserTokens
+  FlaskPortParameter:
+    Description: Port number the Flask OAuth helper will run on
+    Type: Number
+    Default: 5000
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Description: Latest Amazon Linux 2 AMI ID for the region
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2' # Example, adjust if needed
+  SubnetIdParameter:
+     Description: Optional - Subnet ID to launch the instance in. If blank, uses default VPC subnet.
+     Type: AWS::EC2::Subnet::Id
+     Default: "" # Leave blank to use default VPC/Subnet
+  VpcIdParameter:
+     Description: Optional - VPC ID. If blank, uses default VPC. Required if SubnetIdParameter is specified.
+     Type: AWS::EC2::VPC::Id
+     Default: "" # Leave blank to use default VPC
+
+Conditions:
+  HasSubnetId: !Not [!Equals [!Ref SubnetIdParameter, ""]]
+  HasVpcId: !Not [!Equals [!Ref VpcIdParameter, ""]]
+  UseDefaultVpc: !Equals [!Ref VpcIdParameter, ""]
+
+
+Mappings:
+  # Add mappings if needed, e.g., Region specific AMIs if not using SSM Parameter Store lookup
+
+Resources:
+  # --- IAM Role and Instance Profile ---
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: XSchedulerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # SSM Permissions for deployment and management
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommands
+                  - ssm:ListCommandInvocations
+                  # Required for SSM Agent / Session Manager (optional but recommended)
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                  - ssm:UpdateInstanceInformation
+                Resource: "*" # Scope down if possible, e.g., only specific instances
+              # SSM Parameter Store Read Permissions
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/x-scheduler/*"
+              # S3 Permissions for video storage
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  # - s3:ListBucket # Uncomment if needed, see Resource below
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3BucketNameParameter}/*" # Object-level permissions
+                  # - !Sub "arn:aws:s3:::${S3BucketNameParameter}" # Bucket-level permission (for ListBucket)
+              # DynamoDB Permissions for token storage
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:DescribeTable
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTableNameParameter}"
+              # CloudWatch Logs Permissions
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ssm/*:*" # For SSM logs
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup # Allow creation of app log groups
+                Resource: "*" # Or scope down if group name is known/patterned
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:x-scheduler-*:log-stream:*" # Scope to app log groups
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref EC2InstanceRole
+
+  # --- Security Group ---
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH and Flask app access
+      VpcId: !If [UseDefaultVpc, !Ref "AWS::NoValue", !Ref VpcIdParameter] # Use default VPC if VpcIdParameter is empty
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0 # WARNING: Allows SSH from anywhere. Restrict this to your IP address for production.
+        - IpProtocol: tcp
+          FromPort: !Ref FlaskPortParameter
+          ToPort: !Ref FlaskPortParameter
+          CidrIp: 0.0.0.0/0 # Allows Flask app access from anywhere. Needed for Twitter callback unless behind load balancer/proxy.
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-SG"
+
+  # --- EC2 Instance ---
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceTypeParameter
+      KeyName: !Ref KeyPairName
+      ImageId: !Ref LatestAmiId
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      SubnetId: !If [HasSubnetId, !Ref SubnetIdParameter, !Ref "AWS::NoValue"] # Use specified SubnetId or default if empty
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-Instance"
+        - Key: Project
+          Value: x-scheduler
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          # Update packages and install basic dependencies
+          yum update -y
+          yum install -y aws-cfn-bootstrap # Helper for CloudFormation signalling (optional but good practice)
+          yum install -y docker git python3-pip jq aws-cli # Install Docker, Git, Python3, jq, AWS CLI
+
+          # Start and enable Docker service
+          systemctl enable --now docker
+          usermod -aG docker ec2-user # Add ec2-user to docker group
+
+          # Install docker-compose
+          pip3 install docker-compose
+
+          # Create project directory (adjust path if needed)
+          PROJECT_DIR="/home/ec2-user/X-scheduler"
+          mkdir -p ${PROJECT_DIR}
+          chown ec2-user:ec2-user ${PROJECT_DIR}
+
+          # Install SSM Agent (often pre-installed on Amazon Linux 2, but good to ensure)
+          yum install -y https://s3.${AWS::Region}.amazonaws.com/amazon-ssm-${AWS::Region}/latest/linux_amd64/amazon-ssm-agent.rpm
+          systemctl enable amazon-ssm-agent
+          systemctl start amazon-ssm-agent
+
+          # --- Optional: Signal CloudFormation that UserData is complete ---
+          # /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+
+          echo "UserData script completed."
+
+
+Outputs:
+  InstanceId:
+    Description: Instance ID of the newly created EC2 instance
+    Value: !Ref EC2Instance
+    Export:
+      Name: !Sub "${AWS::StackName}-InstanceId" # Optional: Export for cross-stack reference
+  PublicIp:
+    Description: Public IP address of the newly created EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicIp" # Optional: Export
+  SecurityGroupId:
+    Description: Security Group ID for the instance
+    Value: !Ref InstanceSecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-SecurityGroupId" # Optional: Export 

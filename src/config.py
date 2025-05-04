@@ -108,6 +108,30 @@ class ConfigLoader:
                 'bearer_token': os.getenv('X_BEARER_TOKEN')
             }
     
+    def get_oauth2_credentials(self):
+        """
+        Get OAuth 2.0 credentials for Twitter API from environment variables or SSM Parameter Store.
+        
+        Returns:
+            dict: Dictionary containing OAuth 2.0 client credentials and settings.
+        """
+        if self.use_ssm:
+            # Get credentials from AWS SSM Parameter Store
+            return {
+                'client_id': self.get_ssm_parameter('oauth-client-id'),
+                'client_secret': self.get_ssm_parameter('oauth-client-secret'),
+                'redirect_uri': self.get_ssm_parameter('oauth-redirect-uri', 'http://localhost:5000/callback'),
+                'scopes': ['tweet.read', 'tweet.write', 'users.read', 'offline.access', 'media.write']
+            }
+        else:
+            # Get credentials from environment variables (local development)
+            return {
+                'client_id': os.getenv('X_OAUTH_CLIENT_ID'),
+                'client_secret': os.getenv('X_OAUTH_CLIENT_SECRET'),
+                'redirect_uri': os.getenv('X_OAUTH_REDIRECT_URI', 'http://localhost:5000/callback'),
+                'scopes': ['tweet.read', 'tweet.write', 'users.read', 'offline.access', 'media.write']
+            }
+    
     def get_content_source_config(self):
         """
         Get Google Sheets content source configuration.
@@ -118,6 +142,19 @@ class ConfigLoader:
         return {
             'source_type': 'google_sheet',
             'google_sheet': self.get_google_sheet_config()
+        }
+        
+    def get_s3_config(self):
+        """
+        Get S3 configuration for video storage.
+        
+        Returns:
+            dict: S3 configuration.
+        """
+        media_config = self.config.get('media', {})
+        return {
+            'bucket_name': media_config.get('s3_bucket', 'x-scheduler-video-uploads'),
+            'delete_after_upload': media_config.get('delete_after_upload', True)
         }
     
     def get_google_sheet_config(self):

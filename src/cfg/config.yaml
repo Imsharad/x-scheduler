@@ -14,6 +14,19 @@ google_sheet:
   # Can also be set via GOOGLE_CREDENTIALS_PATH environment variable
   credentials_path: "config/google-credentials.json"
 
+# Media settings for video uploads
+media:
+  # Supported video formats
+  supported_formats: ["mp4", "mov", "avi", "webm"]
+  # Maximum video size in bytes (140 MB)
+  max_size_bytes: 147483648
+  # Maximum video duration in seconds (2 minutes and 20 seconds)
+  max_duration_seconds: 140
+  # S3 bucket configuration for temporary video storage
+  s3_bucket: "x-scheduler-video-uploads"
+  # Delete videos from S3 after successful upload to Twitter
+  delete_after_upload: true
+
 # Scheduling
 schedule:
   mode: "interval"  # interval or specific_times
@@ -27,4 +40,15 @@ schedule:
 logging:
   file_path: "src/log/pipeline.log"
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# OAuth 2.0 Settings for Video Upload
+oauth:
+  # DynamoDB table name for token storage
+  dynamo_table_name: "XSchedulerUserTokens"
+  # Default user ID for token storage
+  default_user_id: "default_user"
+  # Web server settings for authorization
+  web_server:
+    host: "0.0.0.0"
+    port: 5000
 

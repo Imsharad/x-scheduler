@@ -5,217 +5,370 @@ This module handles the scheduling of tweets based on the configured schedule.
 """
 import schedule
 import time
-import random
-import datetime
 import os
-from typing import List, Dict, Any, Optional
-from pathlib import Path
-
-from .config import config
-from .utils import setup_logging, create_file_if_not_exists
-from .google_sheet_source import GoogleSheetSource
-from .processor import ContentProcessor
-from .poster import TwitterPoster
+import tempfile
+from typing import Dict, Any, Optional, List, Tuple
+from .s3_utils import S3Manager
+from .video_downloader import VideoDownloader
+from .video_validator import VideoValidator
 
 
-class TweetScheduler:
+class Scheduler:
     """
-    Manages scheduling and posting of tweets.
+    Handles scheduling and execution of tweets.
     """
     
-    def __init__(self, debug=False):
+    def __init__(self, poster, source, processor, config, logger=None):
         """
-        Initialize the tweet scheduler.
+        Initialize the scheduler.
+        
+        Args:
+            poster: Twitter poster instance
+            source: Content source instance
+            processor: Content processor instance
+            config: Configuration dictionary
+            logger: Logger instance
         """
-        # Set up logging based on debug flag
-        log_config = config.get_logging_config()
-        log_level = 'DEBUG' if debug else log_config.get('level')
-        self.logger = setup_logging(log_config.get('file_path'), log_level)
+        self.poster = poster
+        self.source = source
+        self.processor = processor
+        self.config = config
+        self.logger = logger
         
-        self.logger.info("Initializing Tweet Scheduler...")
+        # Get scheduling configuration
+        self.schedule_config = config.get('schedule', {})
+        self.schedule_mode = self.schedule_config.get('mode', 'interval')
+        self.schedule_interval = self.schedule_config.get('interval_minutes', 60)
+        self.schedule_times = self.schedule_config.get('specific_times', [])
         
-        # Load config
-        self.content_source_config = config.get_content_source_config()
-        self.schedule_config = config.get_schedule_config()
+        # Initialize S3 manager
+        media_config = config.get('media', {})
+        s3_bucket = media_config.get('s3_bucket', 'x-scheduler-video-uploads')
+        self.s3_manager = S3Manager(bucket_name=s3_bucket, logger=logger)
         
-        # Initialize components
-        self._init_components()
+        # Initialize video downloader
+        max_filesize_mb = int(media_config.get('max_size_bytes', 147483648) / (1024 * 1024))
+        max_duration = media_config.get('max_duration_seconds', 140)
+        self.video_downloader = VideoDownloader(
+            max_filesize_mb=max_filesize_mb,
+            max_duration_seconds=max_duration,
+            logger=logger
+        )
+        
+        # Initialize video validator
+        self.video_validator = VideoValidator(
+            strict_mode=media_config.get('strict_validation', False),
+            logger=logger
+        )
+        
+        # Flag to determine if we should delete videos from S3 after upload
+        self.delete_after_upload = media_config.get('delete_after_upload', True)
         
         # Set up schedule
         self._setup_schedule()
         
-        self.logger.info("Tweet Scheduler initialized successfully.")
-        
-    def _create_content_source(self):
+    def _process_content_item(self, item):
         """
-        Create and return the Google Sheets content source.
-        """
-        self.logger.info("Using Google Sheets content source")
-        return GoogleSheetSource(self.content_source_config, self.logger)
+        Process a single content item and post it to Twitter.
         
-    def _init_components(self):
-        """
-        Initialize content sources, processor, and poster.
-        """
-        # Initialize content source (file or Google Sheets)
-        self.content_source = self._create_content_source()
-        
-        # Initialize content processor
-        self.processor = ContentProcessor(logger=self.logger)
-        
-        # Initialize Twitter poster
-        try:
-            self.twitter_poster = TwitterPoster(config.get_api_credentials(), self.logger)
+        Args:
+            item: Content item dictionary
             
-            # Verify credentials
-            if not self.twitter_poster.verify_credentials():
-                self.logger.error("Failed to verify Twitter API credentials. Please check your .env file.")
+        Returns:
+            bool: True if posted successfully, False otherwise
+        """
+        try:
+            # Process the content
+            tweet_text = self.processor.process(item.get('tweet', ''))
+            
+            # Track temporary files that need to be cleaned up
+            temp_files_to_cleanup = []
+            # Track S3 URIs that need to be deleted after successful post
+            s3_uris_to_cleanup = []
+            
+            # Flag to track if media was handled
+            media_handled = False
+            # Media ID from Twitter upload
+            media_id = None
+            
+            try:
+                # Check for media in this priority order:
+                # 1. video_url (download from external source)
+                # 2. media_path (could be local or S3 path)
+                
+                # Priority 1: Check if we have a video URL to download
+                video_url = item.get('video_url')
+                if video_url:
+                    if self.logger:
+                        self.logger.info(f"Found video URL to download: {video_url}")
+                    
+                    # Download the video
+                    local_video_path = self.video_downloader.download_video(video_url)
+                    if not local_video_path:
+                        if self.logger:
+                            self.logger.error(f"Failed to download video from URL: {video_url}")
+                        return False
+                    
+                    # Add to cleanup list
+                    temp_files_to_cleanup.append(local_video_path)
+                    
+                    # Upload to S3
+                    s3_uri = self.s3_manager.upload_file(local_video_path)
+                    if not s3_uri:
+                        if self.logger:
+                            self.logger.error(f"Failed to upload video to S3: {local_video_path}")
+                        return False
+                    
+                    # Add to S3 cleanup list
+                    s3_uris_to_cleanup.append(s3_uri)
+                    
+                    # Now download from S3 to ensure we have the latest version
+                    # (This step might seem redundant but ensures consistent code flow)
+                    local_video_path_from_s3 = self.s3_manager.download_file(s3_uri)
+                    if not local_video_path_from_s3:
+                        if self.logger:
+                            self.logger.error(f"Failed to download video from S3: {s3_uri}")
+                        return False
+                    
+                    # Add to cleanup list
+                    temp_files_to_cleanup.append(local_video_path_from_s3)
+                    
+                    # Upload to Twitter
+                    media_id = self._upload_media_to_twitter(local_video_path_from_s3)
+                    media_handled = True
+                    
+                # Priority 2: Check if we have a media_path to process
+                if not media_handled and item.get('media_path'):
+                    media_path = item.get('media_path')
+                    
+                    if self.logger:
+                        self.logger.info(f"Processing media path: {media_path}")
+                    
+                    # Check if this is an S3 URI
+                    if self.s3_manager.is_s3_uri(media_path):
+                        if self.logger:
+                            self.logger.info(f"S3 URI detected: {media_path}")
+                        
+                        # Remember this S3 URI for potential cleanup
+                        s3_uris_to_cleanup.append(media_path)
+                        
+                        # Download from S3
+                        local_path = self.s3_manager.download_file(media_path)
+                        if not local_path:
+                            if self.logger:
+                                self.logger.error(f"Failed to download media from S3: {media_path}")
+                            return False
+                        
+                        # Add to cleanup list
+                        temp_files_to_cleanup.append(local_path)
+                        
+                        # Upload to Twitter
+                        media_id = self._upload_media_to_twitter(local_path)
+                        media_handled = True
+                        
+                    else:
+                        # Local file path
+                        if not os.path.exists(media_path):
+                            if self.logger:
+                                self.logger.error(f"Media file not found: {media_path}")
+                            return False
+                        
+                        # Upload to Twitter
+                        media_id = self._upload_media_to_twitter(media_path)
+                        media_handled = True
+                
+                # Post the tweet (with or without media)
+                if media_id:
+                    if self.logger:
+                        self.logger.info(f"Posting tweet with media ID: {media_id}")
+                    result = self.poster.post_tweet(tweet_text, [media_id])
+                else:
+                    if self.logger:
+                        self.logger.info("Posting tweet without media")
+                    result = self.poster.post_tweet(tweet_text)
+                
+                # Process result
+                if result:
+                    if self.logger:
+                        self.logger.info(f"Posted tweet successfully: {tweet_text}")
+                    
+                    # Mark the item as posted in Google Sheets
+                    self.source.mark_as_posted(item)
+                    
+                    # Clean up S3 if configured to do so
+                    if self.delete_after_upload:
+                        for s3_uri in s3_uris_to_cleanup:
+                            if self.logger:
+                                self.logger.info(f"Deleting video from S3: {s3_uri}")
+                            self.s3_manager.delete_file(s3_uri)
+                    
+                    return True
+                else:
+                    if self.logger:
+                        self.logger.error(f"Failed to post tweet: {tweet_text}")
+                    return False
+                    
+            finally:
+                # Always clean up temporary files
+                for temp_file in temp_files_to_cleanup:
+                    try:
+                        if temp_file and os.path.exists(temp_file):
+                            os.remove(temp_file)
+                            if self.logger:
+                                self.logger.debug(f"Removed temporary file: {temp_file}")
+                    except Exception as e:
+                        if self.logger:
+                            self.logger.warning(f"Failed to remove temporary file {temp_file}: {str(e)}")
                 
         except Exception as e:
-            self.logger.error(f"Failed to initialize Twitter poster: {str(e)}")
-            self.twitter_poster = None
+            if self.logger:
+                self.logger.error(f"Error processing content item: {str(e)}")
+            return False
+            
+    def _upload_media_to_twitter(self, file_path):
+        """
+        Upload media to Twitter.
+        
+        Args:
+            file_path: Path to the media file
+            
+        Returns:
+            str: Media ID if successful, None otherwise
+        """
+        try:
+            # Determine media type based on file extension
+            file_ext = os.path.splitext(file_path)[1].lower()
+            media_type = None
+            
+            if file_ext in ['.mp4', '.mov']:
+                media_type = 'video/mp4'
+            elif file_ext in ['.png']:
+                media_type = 'image/png'
+            elif file_ext in ['.jpg', '.jpeg']:
+                media_type = 'image/jpeg'
+            elif file_ext in ['.gif']:
+                media_type = 'image/gif'
+            else:
+                if self.logger:
+                    self.logger.error(f"Unsupported media format: {file_ext}")
+                return None
+            
+            # For video content, use the chunked upload process
+            if media_type.startswith('video/'):
+                if self.logger:
+                    self.logger.info(f"Uploading video to Twitter: {file_path}")
+                
+                # Use default user for OAuth token
+                user_id = self.config.get('oauth', {}).get('default_user_id', 'default_user')
+                
+                # Upload the video
+                media_id = self.poster.upload_video(
+                    file_path=file_path,
+                    media_type=media_type,
+                    user_id=user_id
+                )
+                
+                if not media_id:
+                    if self.logger:
+                        self.logger.error(f"Failed to upload video to Twitter: {file_path}")
+                    return None
+                
+                return media_id
+                
+            else:
+                # For future implementation of image upload
+                if self.logger:
+                    self.logger.warning(f"Image upload not yet implemented: {file_path}")
+                return None
+                
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error uploading media to Twitter: {str(e)}")
+            return None
             
     def _setup_schedule(self):
         """
         Set up the posting schedule based on configuration.
         """
-        mode = self.schedule_config.get('mode', 'interval')
-        
-        if mode == 'interval':
+        if self.schedule_mode == 'interval':
             # Schedule at regular intervals
-            interval_minutes = self.schedule_config.get('interval_minutes', 240)  # Default to 4 hours
+            if self.logger:
+                self.logger.info(f"Setting up schedule to post every {self.schedule_interval} minutes")
+                
+            schedule.every(self.schedule_interval).minutes.do(self.post_scheduled_tweet)
             
-            self.logger.info(f"Setting up schedule to post every {interval_minutes} minutes.")
-            
-            # Schedule the tweet job
-            schedule.every(interval_minutes).minutes.do(self.post_scheduled_tweet)
-            
-        elif mode == 'specific_times':
+        elif self.schedule_mode == 'specific_times':
             # Schedule at specific times
-            times = self.schedule_config.get('specific_times', ['09:00', '17:00'])
-            
-            self.logger.info(f"Setting up schedule to post at specific times: {', '.join(times)}")
-            
-            # Schedule the tweet job at each specified time
-            for post_time in times:
+            if self.logger:
+                self.logger.info(f"Setting up schedule to post at specific times: {', '.join(self.schedule_times)}")
+                
+            for post_time in self.schedule_times:
                 schedule.every().day.at(post_time).do(self.post_scheduled_tweet)
                 
         else:
-            self.logger.error(f"Unknown schedule mode: {mode}. Using default interval of 4 hours.")
-            schedule.every(240).minutes.do(self.post_scheduled_tweet)
-        
-    def get_content(self) -> Optional[Dict[str, Any]]:
+            if self.logger:
+                self.logger.warning(f"Unknown schedule mode: {self.schedule_mode}. Using default interval of 60 minutes")
+                
+            schedule.every(60).minutes.do(self.post_scheduled_tweet)
+    
+    def post_scheduled_tweet(self):
         """
-        Get content from the configured source. Already filters based on 'is_posted' flag.
+        Post a scheduled tweet.
         
         Returns:
-            dict: A content item to tweet, or None if no suitable content found.
+            bool: True if posted successfully, False otherwise
         """
-        self.logger.info("Fetching content for posting...")
-        
-        # Get content from source
-        all_content = []
-        
+        if self.logger:
+            self.logger.info("Running scheduled tweet post")
+            
         try:
-            # Get content from configured source
-            source_content = self.content_source.fetch_content()
-            all_content.extend(source_content)
+            # Get content from Google Sheets
+            content_items = self.source.fetch_content()
             
-            source_name = self.content_source.get_name()
-            self.logger.info(f"Fetched {len(all_content)} new items from {source_name}.")
-            
-        except Exception as e:
-            self.logger.error(f"Error fetching content: {str(e)}")
-            
-        # If no content available, return None
-        if not all_content:
-            self.logger.warning("No new content available for posting.")
-            return None
-            
-        # Select a random content item
-        selected_item = random.choice(all_content)
-        
-        self.logger.info(f"Selected content: {selected_item.get('tweet')}")
-        return selected_item
-        
-    def post_scheduled_tweet(self) -> bool:
-        """
-        Post a scheduled tweet and mark it as posted in the source.
-        
-        Returns:
-            bool: True if tweet was posted successfully, False otherwise.
-        """
-        self.logger.info("Running scheduled tweet posting...")
-        
-        try:
-            # Get content
-            content_item = self.get_content()
-            
-            if not content_item:
-                self.logger.warning("No content available for posting. Skipping this scheduled tweet.")
+            if not content_items:
+                if self.logger:
+                    self.logger.warning("No content available for posting")
                 return False
                 
-            # Process content into a tweet
-            tweet_text = self.processor.process_content(content_item)
+            # Get the first item that hasn't been posted yet
+            content_item = content_items[0]
             
-            # Post tweet
-            if self.twitter_poster:
-                result = self.twitter_poster.post_tweet(tweet_text)
-                
-                if result:
-                    # Mark as posted in the source upon successful posting
-                    try:
-                        self.content_source.mark_as_posted(content_item)
-                        self.logger.info("Tweet posted successfully and marked as posted in source.")
-                        return True
-                    except Exception as e:
-                        # Log error but consider the tweet posted
-                        self.logger.error(f"Tweet posted successfully, but failed to mark as posted in source: {str(e)}")
-                        return True # Tweet was still posted
-                else:
-                    self.logger.error("Failed to post tweet.")
-                    return False
-            else:
-                self.logger.error("Twitter poster is not initialized. Cannot post tweet.")
-                return False
-                
+            # Process and post the content
+            success = self._process_content_item(content_item)
+            
+            return success
+            
         except Exception as e:
-            self.logger.error(f"Error in scheduled tweet posting: {str(e)}")
+            if self.logger:
+                self.logger.error(f"Error posting scheduled tweet: {str(e)}")
             return False
+    
+    def run_once(self):
+        """
+        Run the scheduler once and exit.
+        """
+        if self.logger:
+            self.logger.info("Running scheduler once")
             
-    def run(self):
+        return self.post_scheduled_tweet()
+    
+    def start(self):
         """
-        Run the scheduler continuously.
+        Start the scheduler and run continuously.
         """
-        self.logger.info("Starting tweet scheduler. Press Ctrl+C to exit.")
-        
-        # Post a tweet immediately on startup (optional)
-        try:
-            self.post_scheduled_tweet()
-        except Exception as e:
-            self.logger.error(f"Error posting initial tweet: {str(e)}")
-        
-        # Run the scheduler continuously
+        if self.logger:
+            self.logger.info("Starting scheduler. Press Ctrl+C to exit")
+            
+        # Run the scheduler loop
         while True:
             try:
                 schedule.run_pending()
                 time.sleep(1)
             except KeyboardInterrupt:
-                self.logger.info("Scheduler stopped by user.")
+                if self.logger:
+                    self.logger.info("Scheduler stopped by user")
                 break
             except Exception as e:
-                self.logger.error(f"Error in scheduler loop: {str(e)}")
-                # Sleep a bit longer to avoid hammering in case of persistent errors
-                time.sleep(60)
-
-
-def main():
-    """
-    Main entry point for the scheduler.
-    """
-    scheduler = TweetScheduler()
-    scheduler.run()
-
-
-if __name__ == "__main__":
-    main() 
+                if self.logger:
+                    self.logger.error(f"Error in scheduler loop: {str(e)}")
+                time.sleep(60)  # Sleep longer on error to avoid rapid retries 
