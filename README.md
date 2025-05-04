@@ -128,6 +128,8 @@ X-Scheduler now supports uploading videos to Twitter using the chunked upload pr
     docker exec <container_id_or_name> python -m src.main --setup-oauth
     ```
     This starts a temporary web server (usually on port 5000) to guide you through the browser-based X authorization flow. Follow the prompts in your terminal and browser. Credentials (refresh tokens) are securely stored (e.g., in DynamoDB for AWS deployments).
+    
+    > **Important**: The OAuth flow must request the `media.write` scope in addition to the standard scopes. This is critical for video uploads and prevents 403 Forbidden errors. The application handles this automatically, but custom implementations must include this scope.
 
 2. **Providing Videos:**
     * **Direct Upload (Testing):** Use the `--upload-video` flag with a local path:

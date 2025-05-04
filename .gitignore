@@ -9,7 +9,8 @@ __pycache__/
 venv/
 env/
 ENV/
-config/google-credentials.json
+config/credentials/google-credentials.json
+deploy/
 deploy/keys/
 *.pem
 
