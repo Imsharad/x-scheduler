@@ -1,57 +1,45 @@
-# Environment variables
-.env
-
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
 
-# Virtual environments
-venv/
+# Environment and credentials
+.env
 .venv/
+venv/
+env/
 ENV/
+config/google-credentials.json
+deploy/keys/
+*.pem
 
 # Logs
-src/log/
+logs/
 *.log
 
-# Data
-src/dat/processed_log.txt
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
 
-# Credentials
-config/google-credentials.json
-*-credentials.json
-*.credentials.json
-service-account-*.json
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
 
-# IDE specific files
+# IDE / Editor files
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# OS specific files
+*~
 .DS_Store
-Thumbs.db
 
-# AI/Meta/Tooling
+# Temporary files
+*.tmp
+*.bak
+temp/
+
+
+# cursor related
 .cursor/
-memory-bank/
-deploy/

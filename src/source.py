@@ -48,12 +48,19 @@ class FileContentSource:
                 for row in reader:
                     # Skip if posted or missing tweet
                     if not row.get('tweet') or row.get('is_posted', '').lower() == 'true':
-                        continue
-                        
-                    items.append({
+                        continue                    
+                    item = {
                         'tweet': row.get('tweet', ''),
                         'content_type': 'curated'
-                    })
+                    }
+                    
+                    # Add media_path if it exists and is not empty
+                    if row.get('media_path') and row.get('media_path').strip():
+                        item['media_path'] = row.get('media_path').strip()
+                        if self.logger:
+                            self.logger.info(f"Found media to upload: {item['media_path']}")
+                    
+                    items.append(item)
                     
             if self.logger:
                 self.logger.info(f"Found {len(items)} items to post")
