@@ -48,7 +48,15 @@ Conditions:
 Mappings:
   RegionMap:
     us-east-1:
-      AMI: ami-0c7217cdde317cfec # Example AMI ID - update as needed
+      AMI: ami-02f3f602d23f1659d # Amazon Linux 2 AMI (HVM), SSD Volume Type (May 2023)
+    us-west-1:
+      AMI: ami-0d9858aa3c6322f73 # Amazon Linux 2 AMI (HVM), SSD Volume Type (May 2023)
+    us-west-2:
+      AMI: ami-098e42ae54c764c35 # Amazon Linux 2 AMI (HVM), SSD Volume Type (May 2023)
+    eu-west-1:
+      AMI: ami-04f7efe62f419d9f5 # Amazon Linux 2 AMI (HVM), SSD Volume Type (May 2023)
+    ap-northeast-1:
+      AMI: ami-0992fc94ca0f1415a # Amazon Linux 2 AMI (HVM), SSD Volume Type (May 2023)
 
 Resources:
   # --- IAM Role and Instance Profile ---
