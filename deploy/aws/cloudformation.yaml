@@ -46,7 +46,9 @@ Conditions:
 
 
 Mappings:
-  # Add mappings if needed, e.g., Region specific AMIs if not using SSM Parameter Store lookup
+  RegionMap:
+    us-east-1:
+      AMI: ami-0c7217cdde317cfec # Example AMI ID - update as needed
 
 Resources:
   # --- IAM Role and Instance Profile ---
