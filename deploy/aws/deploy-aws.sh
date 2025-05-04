@@ -4,10 +4,10 @@
 set -e
 
 # --- Configuration ---
-CONFIG_FILE="deploy/aws/deploy.config"
+CONFIG_FILE="./deploy.config"
 if [[ ! -f "$CONFIG_FILE" ]]; then
     echo "Error: Deployment configuration file not found: $CONFIG_FILE"
-    echo "Please create it based on deploy/aws/deploy.config.example"
+    echo "Please create it based on ./deploy.config.example"
             exit 1
 fi
 source "$CONFIG_FILE"
@@ -15,7 +15,7 @@ source "$CONFIG_FILE"
 # --- AWS & Stack Configuration ---
 REGION=${AWS_REGION:?"AWS_REGION must be set in $CONFIG_FILE"}
 STACK_NAME=${STACK_NAME:-"x-scheduler-stack"}
-TEMPLATE_FILE="deploy/aws/cloudformation.yaml"
+TEMPLATE_FILE="./cloudformation.yaml"
 # Parameters required by cloudformation.yaml (ensure they are in deploy.config)
 KEY_PAIR_NAME=${KEY_PAIR_NAME:?"KEY_PAIR_NAME must be set in $CONFIG_FILE"}
 S3_BUCKET_NAME=${S3_BUCKET_NAME:?"S3_BUCKET_NAME must be set in $CONFIG_FILE"}

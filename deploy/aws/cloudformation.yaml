@@ -31,13 +31,13 @@ Parameters:
     Description: Latest Amazon Linux 2 AMI ID for the region
     Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2' # Example, adjust if needed
   SubnetIdParameter:
-     Description: Optional - Subnet ID to launch the instance in. If blank, uses default VPC subnet.
-     Type: AWS::EC2::Subnet::Id
-     Default: "" # Leave blank to use default VPC/Subnet
+    Description: Optional - Subnet ID to launch the instance in. If not specified, uses default VPC subnet.
+    Type: String
+    Default: ""
   VpcIdParameter:
-     Description: Optional - VPC ID. If blank, uses default VPC. Required if SubnetIdParameter is specified.
-     Type: AWS::EC2::VPC::Id
-     Default: "" # Leave blank to use default VPC
+    Description: Optional - VPC ID. If not specified, uses default VPC. Required if SubnetIdParameter is specified.
+    Type: String
+    Default: ""
 
 Conditions:
   HasSubnetId: !Not [!Equals [!Ref SubnetIdParameter, ""]]
@@ -146,7 +146,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow SSH and Flask app access
-      VpcId: !If [UseDefaultVpc, !Ref "AWS::NoValue", !Ref VpcIdParameter] # Use default VPC if VpcIdParameter is empty
+      VpcId: !If [HasVpcId, !Ref VpcIdParameter, !Ref "AWS::NoValue"] # Use default VPC if VpcIdParameter is empty
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
@@ -166,7 +166,7 @@ Resources:
     Properties:
       InstanceType: !Ref InstanceTypeParameter
       KeyName: !Ref KeyPairName
-      ImageId: !Ref LatestAmiId
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
       IamInstanceProfile: !Ref EC2InstanceProfile
       SecurityGroupIds:
         - !Ref InstanceSecurityGroup
@@ -192,9 +192,9 @@ Resources:
           pip3 install docker-compose
 
           # Create project directory (adjust path if needed)
-          PROJECT_DIR="/home/ec2-user/X-scheduler"
-          mkdir -p ${PROJECT_DIR}
-          chown ec2-user:ec2-user ${PROJECT_DIR}
+          PROJECT_DIR_PATH="/home/ec2-user/X-scheduler"
+          mkdir -p $PROJECT_DIR_PATH
+          chown ec2-user:ec2-user $PROJECT_DIR_PATH
 
           # Install SSM Agent (often pre-installed on Amazon Linux 2, but good to ensure)
           yum install -y https://s3.${AWS::Region}.amazonaws.com/amazon-ssm-${AWS::Region}/latest/linux_amd64/amazon-ssm-agent.rpm
