@@ -11,5 +11,5 @@ RUN pip install --upgrade pip \
 # Copy application code
 COPY . /app
 
-# Run the scheduler
-CMD ["python", "src/main.py"]
+# Run the scheduler as a module
+CMD ["python", "-m", "src.main"]
