@@ -28,9 +28,9 @@ class GoogleSheetSource:
         """
         self.logger = logger or logging.getLogger(__name__)
         
-        # Set required scopes
+        # Set required scopes (changed from .readonly to full spreadsheets access)
         self.scopes = [
-            'https://www.googleapis.com/auth/spreadsheets.readonly',
+            'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/drive.readonly'
         ]
         

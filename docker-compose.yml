@@ -6,6 +6,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./src/log:/app/src/log
-      - ./src/dat:/app/src/dat
+      - ./logs:/app/logs
+      # - ./src/dat:/app/src/dat # Commented out as src/dat seems unused
+      - ./config:/app/config # Map config directory
     restart: always
